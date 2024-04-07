@@ -1,65 +1,42 @@
-/* SAS Macro for the calculation of many-to-one comparison of arithimatic means or least-squred (LS) means 
-   based on a mutiple imputed dataset created from PROC MI.
+/* SAS Macro for the calculation of many-to-one comparison of arithmetic means or least-squared (LS) means 
+   based on a multiple  imputed dataset created from PROC MI.
 
    Author : Wenqing Jiang
    Contact: 2111220022@bjmu.edu.cn; bjmujwq@163.com 
-   Date   : 06 Spet 2023 - start version
+   Date   : 06 Sept 2023 - start version
 
    Arguments  : IMPDAT:   a data created by PROC MI with variable _IMPUTATION_ indicating the imputation ID.
                 TRT    :  a numerical or categorical variable indicating the treatment allocation in the IMPDATA.
                 CONTROL:  a number or a text string indicating the level of control's TRT in the IMPDATA.
 	            MEANTYPE: the type of mean difference to calculate: 
-	                      ARIMEAN = arithimatic mean difference
+	                      ARIMEAN = arithmetic  mean difference
 	                      LSMEAN = LS mean difference;
-                          BOTH = both arithimatic and LS mean differences
+                          BOTH = both arithmetic  and LS mean differences
                           The default string is BOTH.
 	            RESVAR:   a numerical variable indicating the response value to be compared in the IMPDATA.
-	            CATVAR:   categorical variable(s) to be adjusted in the general linear model(GLM) for LS mean difference in the IMPDATA. This argument is not needed
-                          when MEANTYPE = ARIMEAN.
+	            CATVAR:   categorical variable(s) to be adjusted in the general linear model(GLM) for LS mean difference in the IMPDATA. This argument is not needed  when MEANTYPE = ARIMEAN.
                 MODVAR:   a statement of variable(s) except the TRT variable to build the GLM for LS means, that is, in PROC GLM, MODEL RESVAR=TRT MODVAR
-                          However, please note this macro dose not support any Nesting or Interaction Effects that contain TRT. Put TRT aside, users
+                          However, please note this macro does not support any Nesting or Interaction Effects that contain TRT. Put TRT aside, users
                           can build the GLM with other nesting or interaction effects. This argument is not needed when MEANTYPE = ARIMEAN.
-	            MVTAPP:   approach to slove the probability and quantile of multi-variate t (MVT) distribution:
+	            MVTAPP:   approach to solve  the probability and quantile of multi-variate t (MVT) distribution:
 	                      IML = the SAS/IML code for MVT probability written by FRANK BRETZ and a SAS built-in root finding function for the quantile;
-	                      R = call R package 'mvtnorm' written by ALAN GENZ. when specifing MVTAPP=R, user should install a right version of R and 
-	                      'mvtnorm' package thurs SAS/IML can call R function. Default string is IML.
-                ALPHA:    Overall signicifant level. Default value is 0.05
+	                      R = call R package 'mvtnorm' written by ALAN GENZ. when specifying MVTAPP=R, user should install a right version of R and 
+	                      'mvtnorm' package thus  SAS/IML can call R function. Default string is IML.
+                ALPHA:    Overall significant level. Default value is 0.05
+                TESTAT::  The test value for null hypothesis, that is, p-value is test for Diff = TESTAT. Default value is 0
                 LIMIT:    Specify the limit(s) to calculate:
                           UPPER = 1-sided upper limit
                           LOWER = 1-sided lower limit
                           BOTH = 2-sided limits
                           Default string is BOTH.
 	            OUTDAT:   a data to store the results, including the point estimation, interval (limit) estimation and their p-values of mean difference
-                          and LS mean difference. When OUTDAT is skipped, the marco will print the results only  */
+                          and LS mean difference. When OUTDAT is skipped, the macro will print the results only  */
 
-ods trace on;
-ods trace off;
 
-options set=R_HOME='C:\Program Files\R\R-3.5.3';
-option  SPOOL;
-%macro RForQuantiles;
-%include "C:\Users\jwq\Desktop\mph\1_k\version2code\MVT_Quantiles.sas";**submit R function to calculate the quantiles in multivar normal distrubution;
-%mend;
-%macro RForProbabilities;
-%include "C:\Users\jwq\Desktop\mph\1_k\version2code\MVT_Probabilities.sas";**submit R function to calculate the quantiles in multivar normal distrubution;
-%mend;
-%macro ODSOff(); /* Call prior to simulation */
-/*ods graphics off;*/
-ods exclude all; ods noresults; option nonotes;
-%mend;
-%macro ODSOn(); /* Call after simulation*/
-/*ods graphics on;*/
-ods exclude none; ods results; option notes;
-%mend;
-%macro imltosas(data=); create &data. from &data.;append from &data.; %mend;
-%macro sastoiml(data=); use &data.; read all var _num_ into &data.; close &data.; %mend;
 
-proc options option=rlang;run;
-
-%MACRO MI1K(IMPDAT=,TRT=,CONTROL=,MEANTYPE=BOTH,RESVAR=,CATVAR=,MODVAR=,MVTAPP=IML,ALPHA=0.05,LIMIT=BOTH,OUTDAT=);
+%MACRO MI1K(IMPDAT=,TRT=,CONTROL=,MEANTYPE=BOTH,RESVAR=,CATVAR=,MODVAR=,MVTAPP=IML,ALPHA=0.05,TESTAT=0,LIMIT=BOTH,OUTDAT=);
 		data indata;set &impdat;obsnum=_n_;
         run;
-
 		data null_;
         set sashelp.vcolumn end=eof; where libname="WORK" and memname="INDATA";if name=upcase("&trt.") or name = lowcase("&trt.") then call symputx("trttp",type);
 		run;
@@ -111,8 +88,14 @@ proc options option=rlang;run;
 		  MODEL &RESVAR. = Standard_TN &MODVAR./xpx solution INVERSE;
 		quit;
 
-		proc transpose data=invxpx out=trans_inv(drop=_NAME_);
-		where index(parameter,"Dummy") and _imputation_=1;
+		data invxpx_;
+		 set invxpx;
+		 if index(parameter,"Dummy") then do; paramid=input(substr(parameter,6),best.);end;
+		 if 0<paramid<=&k.+1 then output;
+		run;
+
+		proc transpose data=invxpx_ out=trans_inv(drop=_NAME_);
+		where  _imputation_=1;
 		var parameter;
 		run;
 
@@ -123,8 +106,15 @@ proc options option=rlang;run;
 		run;
         %end;
 		PROC IML;
+		%if &MVTAPP=IML %then %do;
+		load module = _all_;
+		load _all_;
+		%end;
 		    L=j(&k,&k+1,0); L[1:&k,1:&k]=i(&k); L[1:&k,&k+1]=repeat(-1,&k,1);
 			prob=1-&ALPHA.;
+			%if &LIMIT=UPPER or &LIMIT=LOWER %then %do;
+			prob=1-2*&ALPHA.;
+			%end;
 			START CALMAT(Q,U) GLOBAL(QBA,UBA,BM,TM, RM,V,R,PROB,TIV,RESMAT);
 				 SUMQ=J(&K,1,0); 
 		         SUMU=J(&K,&K,0);
@@ -144,36 +134,72 @@ proc options option=rlang;run;
 				 V=floor((&m-1)*(1+1/RM)**2);
 				 R=inv(sqrt(diag(TM)))*Tm*inv(sqrt(diag(TM)));
 				 AII=((vecdiag(TM))##0.5);
-		         TIV=abs(QBA)/AII;
+				 TESTC=J(&K,1,&TESTAT.);
+		         TIV=abs(QBA-TESTC)/AII;
 				 Print QBA TM TIV;
 				 RESMAT=j(&k,5,0);
-				  %if &MVTAPP=R %then %do;
+
 					call ExportMatrixToR(r, "r"); 
 					call ExportMatrixToR(v, "v");
 					call ExportMatrixToR(prob, "prob");
-					%RForQuantiles;
-					call ImportMatrixFromR(t2data, "t2data"); 
+					%if &MVTAPP=R %then %do;%RForQuantiles;%end;
+                    %else %if &MVTAPP=IML %then %do;
+						Start Func(x)  global(R,v,prob);
+								  DELTA = J(1,&k,0);
+								  LOWER = J(1,&k,-x);
+								  UPPER = J(1,&k,x);
+								  INFIN = J(1,&k,2);
+						          COVAR = R;
+								  MAXPTS = 2000*&k*&k*&k;
+								  ABSEPS = .001;
+								  RELEPS = 0; 
+								  RUN MVN_DIST(&k, v, DELTA, LOWER, UPPER, INFIN, COVAR, MAXPTS, ABSEPS, RELEPS,  ERROR, VALUE, NEVALS, INFORM );
+								  y=VALUE-prob;	 
+						Return(y);
+						Finish;
+
+					g = froot("Func", {0 5});
+					%end;
+					%if &MVTAPP=R %then %do; call ImportMatrixFromR(t2data, "t2data");  %end; 
 					%do i=1 %to &k;
 						TI=j(&k,1,TIV[&i,1]);
 						call ExportMatrixToR(ti, "ti"); 
-						%RForProbabilities;
-						call ImportMatrixFromR(t2pdata, "t2pdata"); 
+							%if &MVTAPP=R %then %do;%RForProbabilities;%end;
+							%else %if &MVTAPP=IML %then %do;
+							TII=TIV[&i,1];
+							DELTA = J(1,&k,0);
+							LOWER = J(1,&k,-TII);
+							UPPER = J(1,&k,TII);
+							INFIN = J(1,&k,2);
+							COVAR = R;
+							MAXPTS = 2000*&k*&k*&k;
+							ABSEPS = .001;
+							RELEPS = 0;
+                            RUN MVN_DIST(&k, v, DELTA, LOWER, UPPER, INFIN, COVAR, MAXPTS, ABSEPS, RELEPS,  ERROR, VALUE, NEVALS, INFORM );
+                            t2pdata=VALUE;
+							%end;
+						%if &MVTAPP=R %then %do; call ImportMatrixFromR(t2pdata, "t2pdata"); %end;
 						RESMAT[&i,1]=&i;
 						RESMAT[&i,5]=1-t2pdata;
+                    Print TI t2pdata;
 		            %end;
-		          %end;
+
 				  RESMAT[,2]=QBA;
-				  RESMAT[,3]=QBA - t2data[1,1]*AII;
-				  RESMAT[,4]=QBA + t2data[1,1]*AII;
-				  Print RESMAT;
+				  %if &MVTAPP=R %then %do;
+								  RESMAT[,3]=QBA - t2data[1,1]*AII;
+								  RESMAT[,4]=QBA + t2data[1,1]*AII;
+				  %end;
+				  %else %if &MVTAPP=IML %then %do;
+								  RESMAT[,3]=QBA - g*AII;
+								  RESMAT[,4]=QBA + g*AII;
+				  %end;
 			FINISH;
 
 		**LS Means Case;
 			%if &MEANTYPE=LSMEAN or &MEANTYPE=BOTH %then %do;
 		    use PE; read all var {Estimate} where(parameter ? "Standard") into ESTTRT ; close PE;
 			use OA; read all var {MS} where(Source ? "Error")  into MSE; close OA;
-			use InvXPX; read all var {&dummys.} where(Parameter?"Dummy")  into INVXPX; close InvXPX;
-/*					use InvXPX; read all var {Dummy001,Dummy002,Dummy003} where(Parameter?"Dummy")  into INVXPX; close InvXPX;*/
+			use invxpx_; read all var {&dummys.} where(Parameter?"Dummy")  into INVXPX; close invxpx_;
 			QLS=j(&k,&m,.);
 			ULS=j(&k,&m*&k,.);
 			do i=1 to &m; 
@@ -211,8 +237,15 @@ proc options option=rlang;run;
 		Quit;
         %end;
 
+		%if &LIMIT=UPPER or &LIMIT=UPPER %then %do;
+			prob=1-2*&ALPHA.;
+			%end;
+
 		Data RES &OUTDAT;
-		 Retain Type Comparison col2 col3 col4 col5;
+		 Retain Type Comparison col2 
+              %if &LIMIT^=UPPER %then %do; col3 %end;
+			  %if &LIMIT^=LOWER %then %do; col4 %end;
+              col5;
 		 length Type $100 Comparison $100;
 		 Set   %if &MEANTYPE=ARIMEAN or &MEANTYPE=BOTH %then %do; RES_AM(in=a) RES_AMEQV(in=b) %end;
                %if &MEANTYPE=LSMEAN or &MEANTYPE=BOTH %then %do; RES_LS(in=c) %end;;
@@ -226,56 +259,15 @@ proc options option=rlang;run;
 		  %do i=1 %to &k;
 		   if col1=&i then Comparison="&&trtname&i vs. &ctrlname";
 		  %end;
-		  Rename col2=Estimate col3=Lower col4=Upper col5=pValue; 
-		  Keep Type Comparison col2 col3 col4 col5;
+		  Rename col2=Estimate 
+			%if &LIMIT^=UPPER %then %do;  col3=Lower  %end;
+		     %if &LIMIT^=LOWER %then %do;  col4=Upper  %end; 
+          col5=pValue; 
+		  Keep Type Comparison col2 
+              %if &LIMIT^=UPPER %then %do; col3 %end;
+			  %if &LIMIT^=LOWER %then %do; col4 %end;
+         col5;
 		run;
 
 		Proc print data=RES noobs;run;
 %MEND MI1K;
-libname ana "C:\Users\jwq\Desktop\mph\1_k\data";
-/*%MI1K(IMPDAT=ana.hb_imputed2,TRT=trt,CONTROL=TIW,MEANTYPE=BOTH,RESVAR=V5,*/
-/*CATVAR=strata sex,MODVAR=age strata sex,MVTAPP=R,ALPHA=0.05,LIMIT=BOTH,OUTDAT=_out);*/
-
-/*%MI1K(IMPDAT=ana.biomimp2,TRT=trt,CONTROL=0,MEANTYPE=BOTH,RESVAR=resp,CATVAR=,MODVAR=,MVTAPP=R,ALPHA=0.05,LIMIT=BOTH,OUTDAT=_outbiom);*/
-
-/*%let impdat=ana.hb_imputed2;*/
-/*%let trt=trt;*/
-/*%let CONTROL=TIW;*/
-/*%let RESVAR=V5;*/
-/*%let CATVAR=strata sex ;*/
-/*%let MODVAR=age strata sex;*/
-/*%let ALPHA=0.05;*/
-/*%let LIMIT=BOTH;*/
-/*%let MVTAPP=R;*/
-/*%let OUTDAT=_OUT;*/
-
-*******Example of using Frank's SASIML;
-/*libname ana "C:\Users\jwq\Desktop\mph\1_k\data";*/
-/*%include "C:\Users\jwq\Desktop\mph\1_k\version2code\probmvt.sas";*/
-/**/
-/*proc IML;*/
-/*load module = _all_;*/
-/*load _all_;*/
-/*  N = 5;*/
-/*  NU = 10;*/
-/*  DELTA = J(1,N,0);*/
-/**/
-/**/
-/*  LOWER = J(1,N,-2);*/
-/*  UPPER = J(1,N,2);*/
-/*  INFIN = J(1,N,2);*/
-/**/
-/*  COVAR = {   1 .678 0    0 0,*/
-/*           .678    1 0 .678 0,*/
-/*              0    0 1    0 0,*/
-/*              0 .678 0    1 0,*/
-/*              0    0 0    0 1};*/
-/**/
-/*  MAXPTS = 2000*N*N*N;*/
-/*  ABSEPS = .0001;*/
-/*  RELEPS = 0;*/
-/**/
-/*  RUN MVN_DIST( N, NU, DELTA, LOWER, UPPER, INFIN, COVAR, MAXPTS, ABSEPS, RELEPS,  ERROR, VALUE, NEVALS, INFORM );*/
-/**/
-/*  PRINT N ERROR VALUE NEVALS INFORM;*/
-/*QUIT;*/
