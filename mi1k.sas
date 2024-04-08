@@ -139,11 +139,13 @@
 				 Print QBA TM TIV;
 				 RESMAT=j(&k,5,0);
 
-					call ExportMatrixToR(r, "r"); 
+
+					%if &MVTAPP=R %then %do;%RForQuantiles;
+     					call ExportMatrixToR(r, "r"); 
 					call ExportMatrixToR(v, "v");
 					call ExportMatrixToR(prob, "prob");
-					%if &MVTAPP=R %then %do;%RForQuantiles;%end;
-                    %else %if &MVTAPP=IML %then %do;
+                                        %end;
+                                        %else %if &MVTAPP=IML %then %do;
 						Start Func(x)  global(R,v,prob);
 								  DELTA = J(1,&k,0);
 								  LOWER = J(1,&k,-x);
@@ -163,8 +165,10 @@
 					%if &MVTAPP=R %then %do; call ImportMatrixFromR(t2data, "t2data");  %end; 
 					%do i=1 %to &k;
 						TI=j(&k,1,TIV[&i,1]);
-						call ExportMatrixToR(ti, "ti"); 
-							%if &MVTAPP=R %then %do;%RForProbabilities;%end;
+							%if &MVTAPP=R %then %do;
+                                                        %RForProbabilities;
+						        call ExportMatrixToR(ti, "ti"); 
+	                                                %end;
 							%else %if &MVTAPP=IML %then %do;
 							TII=TIV[&i,1];
 							DELTA = J(1,&k,0);
