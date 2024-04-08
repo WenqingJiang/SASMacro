@@ -22,15 +22,6 @@ proc options option=rlang;run;
 
 %inc "&sasroot.\mi1k.sas";
 
-data aax;
- set ana818.HB818_ana818logous;
- if _n_/5=int( _n_/5);
- ID=_n_;
- if rannor(123)>0.5 then Sex="F";else sex="M";
- AGE=48+rannor(123)*18;
- put TRT ID SEX ESASTT AGE HB0 HB1 HB2 HB3 HB4 HB5 HB6 ;
-run;
-
 data sample;
 input TRT $ ID SEX $ ESASTT $ AGE HB0 HB1 HB2 HB3 HB4 HB5 HB6;
 cards;
